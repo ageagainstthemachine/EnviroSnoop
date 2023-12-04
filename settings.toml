@@ -1,0 +1,41 @@
+# EnviroSnoop settings.toml
+
+# WiFi Configuration
+SSID = "SSID"
+PSK = "PSK"
+
+# Location (physical)
+LOCATION = "Some-Room"
+
+# NTP Configuration
+NTP_OFFSET = "-8"  # Your timezone offset from UTC
+NTP_SYNC_INTERVAL = "3600"  # Sync interval (in seconds)
+
+# Sensor read intervals (in seconds)
+SCD4X_INTERVAL = "5"
+BME680_INTERVAL = "5"
+RADSENS_INTERVAL = "5"
+PM25_INTERVAL = "5"
+
+# Display update interval (in seconds)
+DISPLAY_UPDATE_INTERVAL = "1"
+
+# Sensor Calibrations
+SEA_LEVEL_PRESSURE = "1013.25"
+BME680_TEMP_CALIBRATION_OFFSET = "0.0"
+
+# InfluxDB Configuration
+INFLUXDB_URL = "https://whatever.com/api/v2/write"
+INFLUXDB_ORG = "SomeOrg"
+INFLUXDB_BUCKET = "CircuitPython_Bucket"
+INFLUXDB_TOKEN = "SUPER_SECRET_TOKEN_HERE"
+INFLUXDB_SEND_INTERVAL = "10"
+
+# Syslog Server Configuration
+SYSLOG_SERVER_ENABLED = "FALSE"
+SYSLOG_SERVER = "10.0.0.10"
+SYSLOG_PORT = "514"
+
+# Diagnostic Configuration
+MEMORY_MONITORING = "FALSE"
+CONSOLE_LOG_ENABLED = "FALSE"
