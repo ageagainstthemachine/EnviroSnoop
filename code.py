@@ -565,7 +565,7 @@ async def send_data_to_influxdb():
     global particles_03um, particles_05um, particles_10um, particles_25um, particles_50um, particles_100um
 
     # Wait until the device is connected to WiFi and has synchronized time.
-    while not wifi.radio.connected or not time_synced:
+    while not wifi.radio.connected and not time_synced:
         await asyncio.sleep(1)
 
     # Create a default SSL context for secure HTTP communication.
