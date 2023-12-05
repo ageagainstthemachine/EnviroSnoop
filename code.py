@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20231203a
+# EnviroSnoop Environmental Monitor 20231204a
 
 # ------------------------
 # Libraries & Modules
@@ -65,7 +65,6 @@ def wifi_connect_sync():
             # Print an error message with the exception details.
             # This helps in diagnosing why the connection attempt failed.
             print(f"WiFi connection failed: {e}")
-
 
 # Call wifi_connect_sync in initial operations
 wifi_connect_sync()
@@ -159,8 +158,10 @@ structured_log('Initializing I2C')
 # Initialize I2C for the main program
 i2c = busio.I2C(sda=board.GP20, scl=board.GP21)
 
-# Print UART initializing to the log for diagnostic purposes
-structured_log('Initializing UART')
+# Print PM2.5 UART initializing to the log for diagnostic purposes
+structured_log('Initializing PM2.5 UART')
+# Read settings.toml for PM2.5 interval
+pm25_interval = int(os.getenv('PM25_INTERVAL', 5))
 # Initialize UART with TX on GP12 and RX on GP13 for the PMS3003
 uart = busio.UART(tx=board.GP12, rx=board.GP13, baudrate=9600)
 # If you have a GPIO, its not a bad idea to connect it to the RESET pin
@@ -169,7 +170,6 @@ uart = busio.UART(tx=board.GP12, rx=board.GP13, baudrate=9600)
 # reset_pin.value = False
 reset_pin = None
 pm25 = PM25_UART(uart, reset_pin)
-
 # Global variables to store PM2.5 readings
 pm10_standard = None
 pm25_standard = None
@@ -186,15 +186,14 @@ particles_100um = None
 
 # Print SCD4X initializing to the log for diagnostic purposes
 structured_log('Initializing SCD4X')
+# Read settings.toml for SCD4X interval
+scd4x_interval = int(os.getenv('SCD4X_INTERVAL', 5))
 # Create an instance of the SCD4X class and pass it the i2c object
 scd4x = adafruit_scd4x.SCD4X(i2c)
-
 # Print serial number debug info on SCD4X sensor (uncomment next line if desired for testing)
 #print("Serial number:", [hex(i) for i in scd4x.serial_number])
-
 # Start periodic measurements on the SCD41 sensor
 scd4x.start_periodic_measurement()
-
 # Global variables to store SCD41 readings
 scd4x_co2 = None
 scd4x_temperature = None
@@ -202,9 +201,10 @@ scd4x_humidity = None
 
 # Print RadSens initializing to the log for diagnostic purposes
 structured_log('Initializing RadSens')
+# Read settings.toml for RadSens interval
+radsens_interval = int(os.getenv('RADSENS_INTERVAL', 5))
 # Create an instance of the CG_RadSens class and pass the i2c object
 sensor = CG_RadSens(i2c)
-
 # Global variables to store radiation readings
 rad_intensy_dynamic = None
 rad_intensy_static = None
@@ -217,10 +217,11 @@ structured_log('SEA_LEVEL_PRESSURE loaded as ' + str(SEA_LEVEL_PRESSURE))
 
 # Print BE680 initializing to the log for diagnostic purposes
 structured_log('Initializing BME680')
+# Read settings.toml for BME680 interval
+bme680_interval = int(os.getenv('BME680_INTERVAL', 5))
 # Initialize the BME680 sensor
 bme680_sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
 bme680_sensor.sea_level_pressure = SEA_LEVEL_PRESSURE
-
 # Global variables to store BME680 readings
 bme680_temperature = None
 bme680_humidity = None
@@ -233,6 +234,8 @@ LOCATION = os.getenv('LOCATION', 'Unknown').replace(" ", "-")  # Remove spaces b
 # Print location to the log for diagnostic purposes
 structured_log('Loaded location - ' + str(LOCATION))
 
+# Load InfluxDB configuration details from settings.toml for send interval
+influxdb_send_interval = int(os.getenv('INFLUXDB_SEND_INTERVAL', 10))
 # Load InfluxDB configuration details from settings.toml for time series data storage target
 INFLUXDB_URL_BASE = os.getenv('INFLUXDB_URL')
 INFLUXDB_ORG = os.getenv('INFLUXDB_ORG')
@@ -246,6 +249,7 @@ HEADERS = {
 
 # Initialize the OLED display
 #displayio.release_displays() # We called this earlier
+display_update_interval = int(os.getenv('DISPLAY_UPDATE_INTERVAL', 1))
 #oled_reset = board.GP28 # If your display has a reset pin connected.
 WIDTH = 128
 HEIGHT = 64
@@ -272,7 +276,6 @@ pressure_label = label.Label(terminalio.FONT, text="Press: ", color=0xFFFFFF, x=
 ##altitude_label = label.Label(terminalio.FONT, text="Altitude: ", color=0xFFFFFF, x=0, y=56)
 co2_label = label.Label(terminalio.FONT, text="CO2: ", color=0xFFFFFF, x=0, y=44)
 radiation_label = label.Label(terminalio.FONT, text="Rad: ", color=0xFFFFFF, x=0, y=56)
-
 # Add the labels to the Group
 group.append(temperature_label)
 group.append(humidity_label)
@@ -281,7 +284,6 @@ group.append(pressure_label)
 ##group.append(altitude_label)
 group.append(co2_label)
 group.append(radiation_label)
-
 # Show the group on the Display
 display.show(group)
 
@@ -369,8 +371,10 @@ async def read_pm25():
             # This is important for resilience, especially if the sensor temporarily fails or is disconnected.
             structured_log("Unable to read from PM2.5 sensor, retrying...", usyslog.S_ERR)
             await asyncio.sleep(5)  # Sleep for 5 seconds before retrying to prevent spamming the sensor.
-
-        await asyncio.sleep(1)  # Wait for 1 second before reading the sensor data again to limit the data rate.
+        
+        # Await for pm25_interval amount before the next sensor read to limit the rate of data acquisition.
+        # This interval can be adjusted based on how frequently the sensor data needs to be updated.
+        await asyncio.sleep(pm25_interval)
 
 # Asynchronous function to continuously read data from the SCD4X sensor and update global variables.
 # The SCD4X sensor typically measures CO2 concentration, temperature, and humidity.
@@ -400,9 +404,9 @@ async def read_scd4x():
             # Log the error details for troubleshooting purposes.
             structured_log("SCD4X sensor error:" + str(error), usyslog.S_ERR)
 
-        # Await for 1 second before the next sensor read to limit the rate of data acquisition.
+        # Await for scd4x_interval amount before the next sensor read to limit the rate of data acquisition.
         # This interval can be adjusted based on how frequently the sensor data needs to be updated.
-        await asyncio.sleep(1)
+        await asyncio.sleep(scd4x_interval)
 
 # Asynchronous function to continuously read data from the BME680 sensor and update global variables.
 # The BME680 sensor provides environmental data such as temperature, humidity, air pressure, gas resistance, and altitude.
@@ -474,9 +478,9 @@ async def read_radsens():
             # Log any errors encountered to aid in troubleshooting the sensor or the data fetching process.
             structured_log("RadSens sensor error:" + error.args[0], usyslog.S_ERR)
 
-        # Pause for 1 second before the next read.
-        # This pause helps regulate the frequency of data acquisition from the sensor.
-        await asyncio.sleep(1)
+        # Await for radsens_interval amount before the next sensor read to limit the rate of data acquisition.
+        # This interval can be adjusted based on how frequently the sensor data needs to be updated.
+        await asyncio.sleep(radsens_interval)
 
 # Asynchronous function to manage the WiFi connection.
 # This function continuously checks and maintains the WiFi connection in the background.
@@ -610,8 +614,9 @@ async def send_data_to_influxdb():
         # Manually trigger garbage collection to manage memory usage.
         gc.collect()
 
-        # Wait for a specified interval before sending the next batch of data.
-        await asyncio.sleep(10)
+        # Wait for the influx_send_interval amount before sending the next batch of data.
+        # This interval can be adjusted based on how frequently the sensor data needs to be sent.
+        await asyncio.sleep(influxdb_send_interval)
 
 # Asynchronous function to continuously update the display with sensor readings.
 async def update_display():
@@ -651,9 +656,8 @@ async def update_display():
         # Manually trigger garbage collection to manage memory usage effectively.
         gc.collect()
 
-        # Wait for 1 second before updating the display again.
-        # This sets the update interval of the display.
-        await asyncio.sleep(1)
+        # Wait for display_update_interval amount before updating the display again.
+        await asyncio.sleep(display_update_interval)
 
 # The main asynchronous function that orchestrates and runs all other asynchronous tasks.
 async def main():
