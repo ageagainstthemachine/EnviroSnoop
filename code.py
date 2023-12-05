@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20231204a
+# EnviroSnoop Environmental Monitor 20231204b
 
 # ------------------------
 # Libraries & Modules
@@ -152,6 +152,8 @@ structured_log('Loaded NTP offset value of ' + str(ntp_offset))
 ntp_sync_interval = int(os.getenv('NTP_SYNC_INTERVAL', DEFAULT_NTP_SYNC_INTERVAL))
 # Print that to the log for diagnostic purposes
 structured_log('Loaded NTP sync interval value of ' + str(ntp_sync_interval))
+# Global flag to indicate if time has been synchronized
+time_synced = False
 
 # Print I2C initializing to the log for diagnostic purposes
 structured_log('Initializing I2C')
@@ -513,6 +515,7 @@ async def wifi_connect():
 
 # Asynchronous function to synchronize the device's time using the Network Time Protocol (NTP) at regular intervals.
 async def ntp_time_sync():
+    global time_synced
     # Wait until the device is connected to WiFi before attempting time synchronization.
     # This loop ensures that there is an active network connection for NTP communication.
     while not wifi.radio.connected:
@@ -537,6 +540,9 @@ async def ntp_time_sync():
             # Log the successful time synchronization with the formatted time.
             structured_log(f"Time synchronized: {formatted_time}", usyslog.S_INFO)
 
+            # Set the flag to True after successful sync
+            time_synced = True
+
         # Catch any exceptions that might occur during the time synchronization process.
         # Exceptions can arise from network issues or NTP server unavailability.
         except Exception as e:
@@ -558,8 +564,8 @@ async def send_data_to_influxdb():
     global pm10_standard, pm25_standard, pm100_standard, pm10_env, pm25_env, pm100_env
     global particles_03um, particles_05um, particles_10um, particles_25um, particles_50um, particles_100um
 
-    # Wait until the device is connected to WiFi.
-    while not wifi.radio.connected:
+    # Wait until the device is connected to WiFi and has synchronized time.
+    while not wifi.radio.connected or not time_synced:
         await asyncio.sleep(1)
 
     # Create a default SSL context for secure HTTP communication.
