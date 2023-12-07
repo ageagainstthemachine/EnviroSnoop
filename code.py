@@ -1,16 +1,14 @@
-# EnviroSnoop Environmental Monitor 20231204a
+# EnviroSnoop Environmental Monitor 20231206a
 
 # ------------------------
 # Libraries & Modules
 # ------------------------
 
-# Import necessary libraries and modules
+# Import minimum necessary libraries and modules
+import os
+import gc
 import struct
 import board
-import gc
-import displayio
-import adafruit_displayio_ssd1306
-import terminalio
 import digitalio
 import wifi
 import socketpool
@@ -18,17 +16,45 @@ import adafruit_ntp
 import time
 import asyncio
 import supervisor
-import os
 import busio
 import adafruit_requests as requests
 import ssl
-import usyslog
-import adafruit_bme680
-import adafruit_scd4x
-from RadSens import CG_RadSens
 from circuitpython_base64 import b64decode
-from adafruit_pm25.uart import PM25_UART
+
+# SSD1306 Display
+import displayio
+import adafruit_displayio_ssd1306
+import terminalio
 from adafruit_display_text import label
+
+# Syslog
+SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED', 'false').lower() == 'true'
+import usyslog
+
+# Environment variables to determine if a sensor is enabled
+# BME680
+ENABLE_BME680_SENSOR = os.getenv('ENABLE_BME680_SENSOR', 'true').lower() == 'true'
+# Import if enabled
+if ENABLE_BME680_SENSOR:
+    import adafruit_bme680
+
+# SCD4X
+ENABLE_SCD4X_SENSOR = os.getenv('ENABLE_SCD4X_SENSOR', 'true').lower() == 'true'
+# Import if enabled
+if ENABLE_SCD4X_SENSOR:
+    import adafruit_scd4x
+
+#RadSens
+ENABLE_RADSENS_SENSOR = os.getenv('ENABLE_RADSENS_SENSOR', 'true').lower() == 'true'
+# Import if enabled
+if ENABLE_RADSENS_SENSOR:
+    from RadSens import CG_RadSens
+
+# PMS7003
+ENABLE_PM25_SENSOR = os.getenv('ENABLE_PM25_SENSOR', 'true').lower() == 'true'
+# Import if enabled
+if ENABLE_PM25_SENSOR:
+    from adafruit_pm25.uart import PM25_UART
 
 # ------------------------
 # Initial Operations
@@ -81,7 +107,6 @@ ENABLE_MEMORY_MONITORING = os.getenv('MEMORY_MONITORING', 'false').lower() == 't
 
 # Syslog server configuration for syslog logging
 SYSLOG_SERVER = os.getenv('SYSLOG_SERVER')
-SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED') in ["TRUE", "true"]
 SYSLOG_PORT = int(os.getenv('SYSLOG_PORT', 514))  # Default to 514 if not set
 
 # Initialize syslog server if enabled
@@ -101,6 +126,7 @@ def structured_log(message, level=usyslog.S_INFO):
 
 # This function is designed to monitor and log the current memory usage of the program.
 # It can be used to track memory consumption at various points in the code.
+# Usage example: monitor_memory("Before starting a large operation")
 def monitor_memory(tag=""):
     # Check if memory monitoring is enabled by the ENABLE_MEMORY_MONITORING flag.
     # This allows the memory monitoring feature to be toggled on or off as needed.
@@ -125,8 +151,6 @@ def monitor_memory(tag=""):
         # The tag parameter can be used to specify where in the code this function was called
         # for easier identification in the logs.
         structured_log((f"[Memory] {tag} - Free: {free_memory} bytes and {free_memory_pct}%, Used: {used_memory} bytes, Total: {total_memory} bytes"))
-# Usage example:
-# monitor_memory("Before starting a large operation")
 
 # Print ENABLE_MEMORY_MONITORING to the log for diagnostic purposes
 structured_log("Memory Monitoring Enabled = " + str(ENABLE_MEMORY_MONITORING))
@@ -152,82 +176,92 @@ structured_log('Loaded NTP offset value of ' + str(ntp_offset))
 ntp_sync_interval = int(os.getenv('NTP_SYNC_INTERVAL', DEFAULT_NTP_SYNC_INTERVAL))
 # Print that to the log for diagnostic purposes
 structured_log('Loaded NTP sync interval value of ' + str(ntp_sync_interval))
+# Global flag to indicate if time has been synchronized
+time_synced = False
 
 # Print I2C initializing to the log for diagnostic purposes
 structured_log('Initializing I2C')
 # Initialize I2C for the main program
 i2c = busio.I2C(sda=board.GP20, scl=board.GP21)
 
-# Print PM2.5 UART initializing to the log for diagnostic purposes
-structured_log('Initializing PM2.5 UART')
-# Read settings.toml for PM2.5 interval
-pm25_interval = int(os.getenv('PM25_INTERVAL', 5))
-# Initialize UART with TX on GP12 and RX on GP13 for the PMS3003
-uart = busio.UART(tx=board.GP12, rx=board.GP13, baudrate=9600)
-# If you have a GPIO, its not a bad idea to connect it to the RESET pin
-# reset_pin = DigitalInOut(board.G0)
-# reset_pin.direction = Direction.OUTPUT
-# reset_pin.value = False
-reset_pin = None
-pm25 = PM25_UART(uart, reset_pin)
-# Global variables to store PM2.5 readings
-pm10_standard = None
-pm25_standard = None
-pm100_standard = None
-pm10_env = None
-pm25_env = None
-pm100_env = None
-particles_03um = None
-particles_05um = None
-particles_10um = None
-particles_25um = None
-particles_50um = None
-particles_100um = None
-
-# Print SCD4X initializing to the log for diagnostic purposes
-structured_log('Initializing SCD4X')
-# Read settings.toml for SCD4X interval
-scd4x_interval = int(os.getenv('SCD4X_INTERVAL', 5))
-# Create an instance of the SCD4X class and pass it the i2c object
-scd4x = adafruit_scd4x.SCD4X(i2c)
-# Print serial number debug info on SCD4X sensor (uncomment next line if desired for testing)
-#print("Serial number:", [hex(i) for i in scd4x.serial_number])
-# Start periodic measurements on the SCD41 sensor
-scd4x.start_periodic_measurement()
-# Global variables to store SCD41 readings
-scd4x_co2 = None
-scd4x_temperature = None
-scd4x_humidity = None
-
-# Print RadSens initializing to the log for diagnostic purposes
-structured_log('Initializing RadSens')
-# Read settings.toml for RadSens interval
-radsens_interval = int(os.getenv('RADSENS_INTERVAL', 5))
-# Create an instance of the CG_RadSens class and pass the i2c object
-sensor = CG_RadSens(i2c)
-# Global variables to store radiation readings
-rad_intensy_dynamic = None
-rad_intensy_static = None
-number_of_pulses = None
-
 # Load sea level pressure calibration value from settings.toml
 SEA_LEVEL_PRESSURE = float(os.getenv('SEA_LEVEL_PRESSURE', '1013.25'))  # Default to 1013.25 hPa if not set
 # Print SEA_LEVEL_PRESSURE to the log for diagnostic purposes
 structured_log('SEA_LEVEL_PRESSURE loaded as ' + str(SEA_LEVEL_PRESSURE))
 
-# Print BE680 initializing to the log for diagnostic purposes
-structured_log('Initializing BME680')
-# Read settings.toml for BME680 interval
-bme680_interval = int(os.getenv('BME680_INTERVAL', 5))
-# Initialize the BME680 sensor
-bme680_sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
-bme680_sensor.sea_level_pressure = SEA_LEVEL_PRESSURE
-# Global variables to store BME680 readings
-bme680_temperature = None
-bme680_humidity = None
-bme680_pressure = None
-bme680_gas = None
-bme680_altitude = None
+# If the sensor is enabled, continue configuration
+if ENABLE_PM25_SENSOR:
+    # Print PM2.5 UART initializing to the log for diagnostic purposes
+    structured_log('Initializing PM2.5 UART')
+    # Read settings.toml for PM2.5 interval
+    pm25_interval = int(os.getenv('PM25_INTERVAL', 5))
+    # Initialize UART with TX on GP12 and RX on GP13 for the PMS3003
+    uart = busio.UART(tx=board.GP12, rx=board.GP13, baudrate=9600)
+    # If you have a GPIO, its not a bad idea to connect it to the RESET pin
+    # reset_pin = DigitalInOut(board.G0)
+    # reset_pin.direction = Direction.OUTPUT
+    # reset_pin.value = False
+    reset_pin = None
+    pm25 = PM25_UART(uart, reset_pin)
+    # Global variables to store PM2.5 readings
+    pm10_standard = None
+    pm25_standard = None
+    pm100_standard = None
+    pm10_env = None
+    pm25_env = None
+    pm100_env = None
+    particles_03um = None
+    particles_05um = None
+    particles_10um = None
+    particles_25um = None
+    particles_50um = None
+    particles_100um = None
+
+# If the sensor is enabled, continue configuration
+if ENABLE_SCD4X_SENSOR:
+    # Print SCD4X initializing to the log for diagnostic purposes
+    structured_log('Initializing SCD4X')
+    # Read settings.toml for SCD4X interval
+    scd4x_interval = int(os.getenv('SCD4X_INTERVAL', 5))
+    # Create an instance of the SCD4X class and pass it the i2c object
+    scd4x = adafruit_scd4x.SCD4X(i2c)
+    # Print serial number debug info on SCD4X sensor (uncomment next line if desired for testing)
+    #print("Serial number:", [hex(i) for i in scd4x.serial_number])
+    # Start periodic measurements on the SCD41 sensor
+    scd4x.start_periodic_measurement()
+    # Global variables to store SCD41 readings
+    scd4x_co2 = None
+    scd4x_temperature = None
+    scd4x_humidity = None
+
+# If the sensor is enabled, continue configuration
+if ENABLE_RADSENS_SENSOR:
+    # Print RadSens initializing to the log for diagnostic purposes
+    structured_log('Initializing RadSens')
+    # Read settings.toml for RadSens interval
+    radsens_interval = int(os.getenv('RADSENS_INTERVAL', 5))
+    # Create an instance of the CG_RadSens class and pass the i2c object
+    sensor = CG_RadSens(i2c)
+    # Global variables to store radiation readings
+    rad_intensy_dynamic = None
+    rad_intensy_static = None
+    number_of_pulses = None
+
+# If the sensor is enabled, continue configuration
+if ENABLE_BME680_SENSOR:
+    # Print BE680 initializing to the log for diagnostic purposes
+    structured_log('Initializing BME680')
+    # Read settings.toml for BME680 interval
+    bme680_interval = int(os.getenv('BME680_INTERVAL', 5))
+    # Initialize the BME680 sensor
+    bme680_sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
+    bme680_sensor.sea_level_pressure = SEA_LEVEL_PRESSURE
+    # Global variables to store BME680 readings
+    bme680_temperature = None
+    bme680_humidity = None
+    bme680_pressure = None
+    bme680_gas = None
+    bme680_altitude = None
 
 # Read location from settings.toml file
 LOCATION = os.getenv('LOCATION', 'Unknown').replace(" ", "-")  # Remove spaces by changing them to a dash and default to 'Unknown' if not set
@@ -268,22 +302,28 @@ tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
 group = displayio.Group()
 # Add the TileGrid to the Group
 group.append(tile_grid)
-# Define the text labels with positioning
-temperature_label = label.Label(terminalio.FONT, text="Temp: ", color=0xFFFFFF, x=0, y=8)
-humidity_label = label.Label(terminalio.FONT, text="Humid: ", color=0xFFFFFF, x=0, y=20)
-pressure_label = label.Label(terminalio.FONT, text="Press: ", color=0xFFFFFF, x=0, y=32)
-##gas_label = label.Label(terminalio.FONT, text="Gas: ", color=0xFFFFFF, x=0, y=44)
-##altitude_label = label.Label(terminalio.FONT, text="Altitude: ", color=0xFFFFFF, x=0, y=56)
-co2_label = label.Label(terminalio.FONT, text="CO2: ", color=0xFFFFFF, x=0, y=44)
-radiation_label = label.Label(terminalio.FONT, text="Rad: ", color=0xFFFFFF, x=0, y=56)
-# Add the labels to the Group
-group.append(temperature_label)
-group.append(humidity_label)
-group.append(pressure_label)
-##group.append(gas_label)
-##group.append(altitude_label)
-group.append(co2_label)
-group.append(radiation_label)
+
+# Conditional label creation based on whether sensors are enabled or disabled
+if ENABLE_BME680_SENSOR:
+    temperature_label = label.Label(terminalio.FONT, text="Temp: ", color=0xFFFFFF, x=0, y=8)
+    humidity_label = label.Label(terminalio.FONT, text="Humid: ", color=0xFFFFFF, x=0, y=20)
+    pressure_label = label.Label(terminalio.FONT, text="Press: ", color=0xFFFFFF, x=0, y=32)
+    ##gas_label = label.Label(terminalio.FONT, text="Gas: ", color=0xFFFFFF, x=0, y=44)
+    ##altitude_label = label.Label(terminalio.FONT, text="Altitude: ", color=0xFFFFFF, x=0, y=56)
+    group.append(temperature_label)
+    group.append(humidity_label)
+    group.append(pressure_label)
+    ##group.append(gas_label)
+    ##group.append(altitude_label)
+
+if ENABLE_SCD4X_SENSOR:
+    co2_label = label.Label(terminalio.FONT, text="CO2: ", color=0xFFFFFF, x=0, y=44)
+    group.append(co2_label)
+
+if ENABLE_RADSENS_SENSOR:
+    radiation_label = label.Label(terminalio.FONT, text="Rad: ", color=0xFFFFFF, x=0, y=56)
+    group.append(radiation_label)
+
 # Show the group on the Display
 display.show(group)
 
@@ -513,6 +553,7 @@ async def wifi_connect():
 
 # Asynchronous function to synchronize the device's time using the Network Time Protocol (NTP) at regular intervals.
 async def ntp_time_sync():
+    global time_synced
     # Wait until the device is connected to WiFi before attempting time synchronization.
     # This loop ensures that there is an active network connection for NTP communication.
     while not wifi.radio.connected:
@@ -537,6 +578,9 @@ async def ntp_time_sync():
             # Log the successful time synchronization with the formatted time.
             structured_log(f"Time synchronized: {formatted_time}", usyslog.S_INFO)
 
+            # Set the flag to True after successful sync
+            time_synced = True
+
         # Catch any exceptions that might occur during the time synchronization process.
         # Exceptions can arise from network issues or NTP server unavailability.
         except Exception as e:
@@ -558,8 +602,8 @@ async def send_data_to_influxdb():
     global pm10_standard, pm25_standard, pm100_standard, pm10_env, pm25_env, pm100_env
     global particles_03um, particles_05um, particles_10um, particles_25um, particles_50um, particles_100um
 
-    # Wait until the device is connected to WiFi.
-    while not wifi.radio.connected:
+    # Wait until the device is connected to WiFi and has synchronized time.
+    while not wifi.radio.connected and not time_synced:
         await asyncio.sleep(1)
 
     # Create a default SSL context for secure HTTP communication.
@@ -568,50 +612,50 @@ async def send_data_to_influxdb():
     http_session = requests.Session(pool, ssl_context)
 
     while True:
-        # Send RadSens sensor data.
-        if rad_intensy_dynamic is not None:
+        # Send RadSens sensor data
+        if ENABLE_RADSENS_SENSOR and rad_intensy_dynamic is not None:
             await send_data(f"radiation_intensity_dynamic,device=radsens,location={LOCATION} value={rad_intensy_dynamic}", http_session)
-        if rad_intensy_static is not None:
+        if ENABLE_RADSENS_SENSOR and rad_intensy_static is not None:
             await send_data(f"radiation_intensity_static,device=radsens,location={LOCATION} value={rad_intensy_static}", http_session)
-        if number_of_pulses is not None:
+        if ENABLE_RADSENS_SENSOR and number_of_pulses is not None:
             await send_data(f"number_of_pulses,device=radsens,location={LOCATION} value={number_of_pulses}", http_session)
 
-        # Send BME680 sensor data.
-        if bme680_temperature is not None:
+        # Send BME680 sensor data
+        if ENABLE_BME680_SENSOR and bme680_temperature is not None:
             await send_data(f"temperature,device=bme680,location={LOCATION} value={bme680_temperature}", http_session)
-        if bme680_humidity is not None:
+        if ENABLE_BME680_SENSOR and bme680_humidity is not None:
             await send_data(f"humidity,device=bme680,location={LOCATION} value={bme680_humidity}", http_session)
-        if bme680_pressure is not None:
+        if ENABLE_BME680_SENSOR and bme680_pressure is not None:
             await send_data(f"pressure,device=bme680,location={LOCATION} value={bme680_pressure}", http_session)
-        if bme680_gas is not None:
+        if ENABLE_BME680_SENSOR and bme680_gas is not None:
             await send_data(f"gas_resistance,device=bme680,location={LOCATION} value={bme680_gas}", http_session)
-        if bme680_altitude is not None:
+        if ENABLE_BME680_SENSOR and bme680_altitude is not None:
             await send_data(f"altitude,device=bme680,location={LOCATION} value={bme680_altitude}", http_session)
 
-        # Send SCD4X sensor data.
-        if scd4x_co2 is not None:
+        # Send SCD4X sensor data
+        if ENABLE_SCD4X_SENSOR and scd4x_co2 is not None:
             await send_data(f"co2,device=scd4x,location={LOCATION} value={scd4x_co2}", http_session)
-        if scd4x_temperature is not None:
+        if ENABLE_SCD4X_SENSOR and scd4x_temperature is not None:
             await send_data(f"temperature_scd4x,device=scd4x,location={LOCATION} value={scd4x_temperature}", http_session)
-        if scd4x_humidity is not None:
+        if ENABLE_SCD4X_SENSOR and scd4x_humidity is not None:
             await send_data(f"humidity_scd4x,device=scd4x,location={LOCATION} value={scd4x_humidity}", http_session)
 
         # Send PM2.5 sensor data
-        if pm10_standard is not None:
+        if ENABLE_PM25_SENSOR and pm10_standard is not None:
             await send_data(f"pm10_standard,device=pm25,location={LOCATION} value={pm10_standard}", http_session)
-        if pm25_standard is not None:
+        if ENABLE_PM25_SENSOR and pm25_standard is not None:
             await send_data(f"pm25_standard,device=pm25,location={LOCATION} value={pm25_standard}", http_session)
-        if pm100_standard is not None:
+        if ENABLE_PM25_SENSOR and pm100_standard is not None:
             await send_data(f"pm100_standard,device=pm25,location={LOCATION} value={pm100_standard}", http_session)
-        if pm10_env is not None:
+        if ENABLE_PM25_SENSOR and pm10_env is not None:
             await send_data(f"pm10_env,device=pm25,location={LOCATION} value={pm10_env}", http_session)
-        if pm25_env is not None:
+        if ENABLE_PM25_SENSOR and pm25_env is not None:
             await send_data(f"pm25_env,device=pm25,location={LOCATION} value={pm25_env}", http_session)
-        if pm100_env is not None:
+        if ENABLE_PM25_SENSOR and pm100_env is not None:
             await send_data(f"pm100_env,device=pm25,location={LOCATION} value={pm100_env}", http_session)
-        # Continue with other particulate data if desired/necessary
+        # Continue with other particulate data if desired/necessary.
 
-        # Manually trigger garbage collection to manage memory usage.
+        # Manually trigger garbage collection to manage memory usage
         gc.collect()
 
         # Wait for the influx_send_interval amount before sending the next batch of data.
@@ -621,33 +665,42 @@ async def send_data_to_influxdb():
 # Asynchronous function to continuously update the display with sensor readings.
 async def update_display():
     while True:  # Infinite loop for continuous updates.
-        # Log a structured message indicating that the display is being updated.
-        # This log is for monitoring purposes and can help in debugging.
-        structured_log(f"Updating Display - Temp: {bme680_temperature}, Humidity: {bme680_humidity}, Pressure: {bme680_pressure}", usyslog.S_INFO)
+        # Update the display only if BME680 sensor is enabled
+        if ENABLE_BME680_SENSOR:
+            # Only update the display if the sensor data is available
+            if bme680_temperature is not None:
+                temperature_label.text = f"Temp: {bme680_temperature:.2f}C"
+            else:
+                temperature_label.text = "Temp: --"
 
-        # Update the display labels with the latest sensor values.
+            if bme680_humidity is not None:
+                humidity_label.text = f"Humid: {bme680_humidity:.2f}%"
+            else:
+                humidity_label.text = "Humid: --"
 
-        # Update the temperature label with the latest reading from the BME680 sensor.
-        # The temperature is formatted to two decimal places and displayed in Celsius.
-        temperature_label.text = f"Temp: {bme680_temperature:.2f}C"
+            if bme680_pressure is not None:
+                pressure_label.text = f"Press: {bme680_pressure:.2f}hPa"
+            else:
+                pressure_label.text = "Press: --"
 
-        # Update the humidity label with the latest humidity reading from the BME680 sensor.
-        # The humidity is formatted to two decimal places and displayed in percentage.
-        humidity_label.text = f"Humid: {bme680_humidity:.2f}%"
+            # Log the updated BME680 sensor readings for diagnostics
+            structured_log(f"Updating Display - Temp: {bme680_temperature}, Humidity: {bme680_humidity}, Pressure: {bme680_pressure}", usyslog.S_INFO)
 
-        # Update the pressure label with the latest pressure reading from the BME680 sensor.
-        # The pressure is formatted to two decimal places and displayed in hectopascals (hPa).
-        pressure_label.text = f"Press: {bme680_pressure:.2f}hPa"
+        # Update the display only if SCD4X sensor is enabled
+        if ENABLE_SCD4X_SENSOR:
+            # Update CO2 reading on the display
+            co2_label.text = f"CO2: {scd4x_co2} ppm"
 
-        # Uncomment the following lines if you want to display gas resistance and altitude.
-        ##gas_label.text = f"Gas: {bme680_gas:.2f}ohms"
-        ##altitude_label.text = f"Altitude: {bme680_altitude:.2f}m"
+            # Log the updated SCD4X CO2 reading for diagnostics
+            structured_log(f"Updating Display - CO2: {scd4x_co2}", usyslog.S_INFO)
 
-        # Update the CO2 label with the latest CO2 reading from the SCD4X sensor.
-        co2_label.text = f"CO2: {scd4x_co2} ppm"
+        # Update the display only if RadSens sensor is enabled
+        if ENABLE_RADSENS_SENSOR:
+            # Update radiation reading on the display
+            radiation_label.text = f"Rad: {rad_intensy_dynamic} uR/h"
 
-        # Update the radiation label with the latest dynamic radiation intensity reading.
-        radiation_label.text = f"Rad: {rad_intensy_dynamic} uR/h"
+            # Log the updated RadSens radiation reading for diagnostics
+            structured_log(f"Updating Display - Radiation: {rad_intensy_dynamic}", usyslog.S_INFO)
 
         # Refreshing the display is not needed in every environment, hence it's commented out.
         # If your display requires manual refreshing after changing label texts, uncomment the next line.
@@ -664,25 +717,24 @@ async def main():
     # Define a list of tasks that need to be run concurrently.
     # Each task is created using asyncio.create_task from the respective asynchronous function.
     tasks = [
-        # Create tasks for reading data from the SCD4X, BME680, and RadSens sensors.
-        asyncio.create_task(read_scd4x()),
-        asyncio.create_task(read_bme680()),
-        asyncio.create_task(read_radsens()),
-        # Uncomment the following line if you want to include the PM2.5 sensor reading task.
-        asyncio.create_task(read_pm25()),
-
         # Create a task for managing the WiFi connection.
         asyncio.create_task(wifi_connect()),
-
         # Create a task for synchronizing the device's time with an NTP server.
         asyncio.create_task(ntp_time_sync()),
-
         # Create a task for sending sensor data to an InfluxDB database.
         asyncio.create_task(send_data_to_influxdb()),
-
         # Create a task for continuously updating the display with the latest sensor readings.
         asyncio.create_task(update_display())
     ]
+    # Create tasks for reading data from the SCD4X, BME680, and RadSens sensors.
+    if ENABLE_SCD4X_SENSOR:
+        tasks.append(asyncio.create_task(read_scd4x()))
+    if ENABLE_BME680_SENSOR:
+        tasks.append(asyncio.create_task(read_bme680()))
+    if ENABLE_PM25_SENSOR:
+        tasks.append(asyncio.create_task(read_pm25()))
+    if ENABLE_RADSENS_SENSOR:
+        tasks.append(asyncio.create_task(read_radsens()))
 
     # Use asyncio.gather to run all the tasks concurrently.
     # This allows the program to handle multiple operations in parallel.
