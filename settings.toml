@@ -11,6 +11,12 @@ LOCATION = "Some-Room"
 NTP_OFFSET = "-8"  # Your timezone offset from UTC
 NTP_SYNC_INTERVAL = "3600"  # Sync interval (in seconds)
 
+# Sensor enable/disable
+ENABLE_PM25_SENSOR = "FALSE"
+ENABLE_SCD4X_SENSOR = "TRUE"
+ENABLE_RADSENS_SENSOR = "TRUE"
+ENABLE_BME680_SENSOR = "TRUE"
+
 # Sensor read intervals (in seconds)
 SCD4X_INTERVAL = "5"
 BME680_INTERVAL = "5"
