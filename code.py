@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20231206a
+# EnviroSnoop Environmental Monitor 20231207a
 
 # ------------------------
 # Libraries & Modules
@@ -233,6 +233,8 @@ if ENABLE_SCD4X_SENSOR:
     scd4x_co2 = None
     scd4x_temperature = None
     scd4x_humidity = None
+    # Log the memory monitor post-initialization
+    monitor_memory("Post SCD4X Initialization")
 
 # If the sensor is enabled, continue configuration
 if ENABLE_RADSENS_SENSOR:
@@ -246,6 +248,8 @@ if ENABLE_RADSENS_SENSOR:
     rad_intensy_dynamic = None
     rad_intensy_static = None
     number_of_pulses = None
+    # Log the memory monitor post-initialization
+    monitor_memory("Post RadSens Initialization")
 
 # If the sensor is enabled, continue configuration
 if ENABLE_BME680_SENSOR:
@@ -253,7 +257,7 @@ if ENABLE_BME680_SENSOR:
     structured_log('Initializing BME680')
     # Read settings.toml for BME680 interval
     bme680_interval = int(os.getenv('BME680_INTERVAL', 5))
-    # Initialize the BME680 sensor
+    # Initialize the BME680 sensor.
     bme680_sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c)
     bme680_sensor.sea_level_pressure = SEA_LEVEL_PRESSURE
     # Global variables to store BME680 readings
@@ -262,6 +266,8 @@ if ENABLE_BME680_SENSOR:
     bme680_pressure = None
     bme680_gas = None
     bme680_altitude = None
+    # Log the memory monitor post-initialization
+    monitor_memory("Post BME680 Initialization")
 
 # Read location from settings.toml file
 LOCATION = os.getenv('LOCATION', 'Unknown').replace(" ", "-")  # Remove spaces by changing them to a dash and default to 'Unknown' if not set
@@ -406,11 +412,22 @@ async def read_pm25():
             # This uses the structured_log function to log the data in a structured format.
             structured_log(f"PM2.5 Data - PM 1.0 (Standard): {pm10_standard}, PM2.5 (Standard): {pm25_standard}, PM10 (Standard): {pm100_standard}, PM 1.0 (Env): {pm10_env}, PM2.5 (Env): {pm25_env}, PM10 (Env): {pm100_env}, Particles > 0.3um: {particles_03um}, Particles > 0.5um: {particles_05um}, Particles > 1.0um: {particles_10um}, Particles > 2.5um: {particles_25um}, Particles > 5.0um: {particles_50um}, Particles > 10um: {particles_100um}", usyslog.S_INFO)
 
-        except RuntimeError:
-            # If there's an error in reading from the sensor, log the error and then retry after a delay.
-            # This is important for resilience, especially if the sensor temporarily fails or is disconnected.
-            structured_log("Unable to read from PM2.5 sensor, retrying...", usyslog.S_ERR)
-            await asyncio.sleep(5)  # Sleep for 5 seconds before retrying to prevent spamming the sensor.
+        # If there's an error in reading from the sensor, log the error and then retry after a delay.
+        # This is important for resilience, especially if the sensor temporarily fails or is disconnected.
+        except IOError as io_error:
+            # Handle I2C communication errors specifically
+            structured_log(f"PM2.5 sensor I/O error: {io_error}", usyslog.S_ERR)
+            await asyncio.sleep(10)  # Longer sleep for I/O errors
+
+        except RuntimeError as runtime_error:
+            # Handle other runtime errors
+            structured_log(f"PM2.5 sensor runtime error: {runtime_error}", usyslog.S_ERR)
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            # Catch-all for any other exceptions
+            structured_log(f"Unexpected error reading PM2.5 sensor: {e}", usyslog.S_ERR)
+            await asyncio.sleep(10)
         
         # Await for pm25_interval amount before the next sensor read to limit the rate of data acquisition.
         # This interval can be adjusted based on how frequently the sensor data needs to be updated.
@@ -440,9 +457,17 @@ async def read_scd4x():
 
         # Catch and handle any runtime errors during sensor reading.
         # This could happen due to communication issues with the sensor or hardware malfunctions.
-        except RuntimeError as error:
-            # Log the error details for troubleshooting purposes.
-            structured_log("SCD4X sensor error:" + str(error), usyslog.S_ERR)
+        except IOError as io_error:
+            structured_log(f"SCD4X sensor I/O error: {io_error}", usyslog.S_ERR)
+            await asyncio.sleep(10)
+
+        except RuntimeError as runtime_error:
+            structured_log(f"SCD4X sensor runtime error: {runtime_error}", usyslog.S_ERR)
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            structured_log(f"Unexpected error reading SCD4X sensor: {e}", usyslog.S_ERR)
+            await asyncio.sleep(10)
 
         # Await for scd4x_interval amount before the next sensor read to limit the rate of data acquisition.
         # This interval can be adjusted based on how frequently the sensor data needs to be updated.
@@ -480,9 +505,17 @@ async def read_bme680():
 
         # Catch and handle any runtime errors during sensor reading.
         # This could be due to communication issues or sensor malfunctions.
-        except RuntimeError as error:
-            # Log the error details for troubleshooting.
-            structured_log("BME680 sensor error:" + error.args[0], usyslog.S_ERR)
+        except IOError as io_error:
+            structured_log(f"BME680 sensor I/O error: {io_error}", usyslog.S_ERR)
+            await asyncio.sleep(10)
+
+        except RuntimeError as runtime_error:
+            structured_log(f"BME680 sensor runtime error: {runtime_error}", usyslog.S_ERR)
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            structured_log(f"Unexpected error reading BME680 sensor: {e}", usyslog.S_ERR)
+            await asyncio.sleep(10)
 
         # Await for 1 second before the next sensor read to regulate the data acquisition rate.
         await asyncio.sleep(1)
@@ -514,9 +547,17 @@ async def read_radsens():
 
         # Catch and handle any runtime errors that occur during data retrieval from the sensor.
         # Errors might arise from communication issues with the sensor or other hardware-related problems.
-        except RuntimeError as error:
-            # Log any errors encountered to aid in troubleshooting the sensor or the data fetching process.
-            structured_log("RadSens sensor error:" + error.args[0], usyslog.S_ERR)
+        except IOError as io_error:
+            structured_log(f"RadSens sensor I/O error: {io_error}", usyslog.S_ERR)
+            await asyncio.sleep(10)
+
+        except RuntimeError as runtime_error:
+            structured_log(f"RadSens sensor runtime error: {runtime_error}", usyslog.S_ERR)
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            structured_log(f"Unexpected error reading RadSens sensor: {e}", usyslog.S_ERR)
+            await asyncio.sleep(10)
 
         # Await for radsens_interval amount before the next sensor read to limit the rate of data acquisition.
         # This interval can be adjusted based on how frequently the sensor data needs to be updated.
@@ -541,6 +582,10 @@ async def wifi_connect():
             # Catch exceptions that occur if the WiFi connection fails.
             # This could be due to incorrect credentials, signal issues, or other WiFi-related problems.
             except (ConnectionError, wifi.RadioError) as e:
+                # Log the failed attempt and any associated information.
+                structured_log(f"WiFi connection attempt failed: {e}", usyslog.S_ERR)
+                # Log the memory
+                monitor_memory("Post WiFi Connection Attempt")
                 # If an error occurs, the function will pause for 10 seconds before retrying.
                 # This prevents the function from attempting to reconnect too frequently.
                 await asyncio.sleep(10)
@@ -654,6 +699,9 @@ async def send_data_to_influxdb():
         if ENABLE_PM25_SENSOR and pm100_env is not None:
             await send_data(f"pm100_env,device=pm25,location={LOCATION} value={pm100_env}", http_session)
         # Continue with other particulate data if desired/necessary.
+
+        # Log the memory
+        monitor_memory("InfluxDB Send")
 
         # Manually trigger garbage collection to manage memory usage
         gc.collect()
