@@ -1,5 +1,7 @@
 # EnviroSnoop
 
+<img src="assets/envirosnoop_logo.png" width="200px" />
+
 ## A Raspberry Pi Pico W-Based Environmental Monitor
 
 EnviroSnoop is an environmental monitoring system employing a Raspberry Pi Pico W. It leverages CircuitPython to measure various environmental parameters using a suite of sensors. Sensors can be easily enabled and disabled, making it a modular framework that supports various sensors. Data is sent to an InfluxDB 2 server for further visualization and analysis.
