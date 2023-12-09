@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20231207a
+# EnviroSnoop Environmental Monitor 20231209a
 
 # ------------------------
 # Libraries & Modules
@@ -66,6 +66,9 @@ displayio.release_displays()
 # Load WiFi credentials from settings.toml for network connection
 ssid = os.getenv('SSID')
 psk = os.getenv('PSK')
+
+# SSL context (verify or skip verification of the cert)
+SSL_VERIFY_HOSTNAME = os.getenv('SSL_VERIFY_HOSTNAME', 'true').lower() == 'true'
 
 # Initialize socketpool for network operations
 pool = socketpool.SocketPool(wifi.radio)
@@ -651,8 +654,10 @@ async def send_data_to_influxdb():
     while not wifi.radio.connected and not time_synced:
         await asyncio.sleep(1)
 
-    # Create a default SSL context for secure HTTP communication.
+    # Create SSL context for secure HTTP communication.
     ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = SSL_VERIFY_HOSTNAME
+    
     # Initialize an HTTP session for sending data.
     http_session = requests.Session(pool, ssl_context)
 

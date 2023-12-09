@@ -4,6 +4,9 @@
 SSID = "SSID"
 PSK = "PSK"
 
+# SSL/TLS Configuration
+SSL_VERIFY_HOSTNAME = "TRUE"
+
 # Location (physical)
 LOCATION = "Some-Room"
 
