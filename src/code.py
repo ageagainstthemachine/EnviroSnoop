@@ -1,4 +1,5 @@
-# EnviroSnoop Environmental Monitor 20231209a
+# EnviroSnoop Environmental Monitor 20250401a
+# https://github.com/ageagainstthemachine/EnviroSnoop
 
 # ------------------------
 # Libraries & Modules
@@ -90,7 +91,7 @@ def wifi_connect_sync():
 
         # If the WiFi connection fails, catch the exception.
         # This could be due to incorrect credentials, network issues, or other WiFi-related errors.
-        except (ConnectionError, wifi.RadioError) as e:
+        except ConnectionError as e:
             # Print an error message with the exception details.
             # This helps in diagnosing why the connection attempt failed.
             print(f"WiFi connection failed: {e}")
@@ -584,7 +585,7 @@ async def wifi_connect():
 
             # Catch exceptions that occur if the WiFi connection fails.
             # This could be due to incorrect credentials, signal issues, or other WiFi-related problems.
-            except (ConnectionError, wifi.RadioError) as e:
+            except ConnectionError as e:
                 # Log the failed attempt and any associated information.
                 structured_log(f"WiFi connection attempt failed: {e}", usyslog.S_ERR)
                 # Log the memory
