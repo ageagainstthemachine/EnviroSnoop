@@ -1,4 +1,4 @@
-# EnviroSnoop settings.toml 20250401a
+# EnviroSnoop settings.toml 20250811a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # WiFi Configuration
@@ -27,6 +27,8 @@ BME680_INTERVAL = "5"
 RADSENS_INTERVAL = "5"
 PM25_INTERVAL = "5"
 
+# Enable/disable the display
+ENABLE_DISPLAY = "FALSE"
 # Display update interval (in seconds)
 DISPLAY_UPDATE_INTERVAL = "1"
 

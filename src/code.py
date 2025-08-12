@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20250401a
+# EnviroSnoop Environmental Monitor 20250811a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # ------------------------
@@ -21,12 +21,6 @@ import busio
 import adafruit_requests as requests
 import ssl
 from circuitpython_base64 import b64decode
-
-# SSD1306 Display
-import displayio
-import adafruit_displayio_ssd1306
-import terminalio
-from adafruit_display_text import label
 
 # Syslog
 SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED', 'false').lower() == 'true'
@@ -57,12 +51,23 @@ ENABLE_PM25_SENSOR = os.getenv('ENABLE_PM25_SENSOR', 'true').lower() == 'true'
 if ENABLE_PM25_SENSOR:
     from adafruit_pm25.uart import PM25_UART
 
+# SSD1306
+ENABLE_DISPLAY = os.getenv('ENABLE_DISPLAY', 'true').lower() == 'true'
+# Import if enabled
+if ENABLE_DISPLAY:
+    import displayio
+    import adafruit_displayio_ssd1306
+    import terminalio
+    from adafruit_display_text import label
+
 # ------------------------
 # Initial Operations
 # ------------------------
 
-# Release the display
-displayio.release_displays()
+# If display is enabled, release the display
+if ENABLE_DISPLAY:
+    # Release the display
+    displayio.release_displays()
 
 # Load WiFi credentials from settings.toml for network connection
 ssid = os.getenv('SSID')
@@ -291,30 +296,32 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-# Initialize the OLED display
-#displayio.release_displays() # We called this earlier
-display_update_interval = int(os.getenv('DISPLAY_UPDATE_INTERVAL', 1))
-#oled_reset = board.GP28 # If your display has a reset pin connected.
-WIDTH = 128
-HEIGHT = 64
-#BORDER = 5
-display_bus = displayio.I2CDisplay(i2c, device_address=0x3c) #, reset=oled_reset)
-display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=WIDTH, height=HEIGHT)
-# Create a bitmap with two colors
-bitmap = displayio.Bitmap(WIDTH, HEIGHT, 2)
-# Create a two color palette
-palette = displayio.Palette(2)
-palette[0] = 0x000000  # Black
-palette[1] = 0xFFFFFF  # White
-# Create a TileGrid using the Bitmap and Palette
-tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
-# Create a Group to hold the TileGrid
-group = displayio.Group()
-# Add the TileGrid to the Group
-group.append(tile_grid)
+# If display is enabled, setup the display
+if ENABLE_DISPLAY:
+    # Initialize the OLED display
+    #displayio.release_displays() # We called this earlier
+    display_update_interval = int(os.getenv('DISPLAY_UPDATE_INTERVAL', 1))
+    #oled_reset = board.GP28 # If your display has a reset pin connected.
+    WIDTH = 128
+    HEIGHT = 64
+    #BORDER = 5
+    display_bus = displayio.I2CDisplay(i2c, device_address=0x3c) #, reset=oled_reset)
+    display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=WIDTH, height=HEIGHT)
+    # Create a bitmap with two colors
+    bitmap = displayio.Bitmap(WIDTH, HEIGHT, 2)
+    # Create a two color palette
+    palette = displayio.Palette(2)
+    palette[0] = 0x000000  # Black
+    palette[1] = 0xFFFFFF  # White
+    # Create a TileGrid using the Bitmap and Palette
+    tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
+    # Create a Group to hold the TileGrid
+    group = displayio.Group()
+    # Add the TileGrid to the Group
+    group.append(tile_grid)
 
 # Conditional label creation based on whether sensors are enabled or disabled
-if ENABLE_BME680_SENSOR:
+if ENABLE_BME680_SENSOR and ENABLE_DISPLAY:
     temperature_label = label.Label(terminalio.FONT, text="Temp: ", color=0xFFFFFF, x=0, y=8)
     humidity_label = label.Label(terminalio.FONT, text="Humid: ", color=0xFFFFFF, x=0, y=20)
     pressure_label = label.Label(terminalio.FONT, text="Press: ", color=0xFFFFFF, x=0, y=32)
@@ -326,16 +333,17 @@ if ENABLE_BME680_SENSOR:
     ##group.append(gas_label)
     ##group.append(altitude_label)
 
-if ENABLE_SCD4X_SENSOR:
+if ENABLE_SCD4X_SENSOR and ENABLE_DISPLAY:
     co2_label = label.Label(terminalio.FONT, text="CO2: ", color=0xFFFFFF, x=0, y=44)
     group.append(co2_label)
 
-if ENABLE_RADSENS_SENSOR:
+if ENABLE_RADSENS_SENSOR and ENABLE_DISPLAY:
     radiation_label = label.Label(terminalio.FONT, text="Rad: ", color=0xFFFFFF, x=0, y=56)
     group.append(radiation_label)
 
-# Show the group on the Display
-display.show(group)
+if ENABLE_DISPLAY:
+    # Show the group on the Display
+    display.show(group)
 
 # Manually trigger garbage collection
 gc.collect()
@@ -777,9 +785,11 @@ async def main():
         asyncio.create_task(ntp_time_sync()),
         # Create a task for sending sensor data to an InfluxDB database.
         asyncio.create_task(send_data_to_influxdb()),
-        # Create a task for continuously updating the display with the latest sensor readings.
-        asyncio.create_task(update_display())
     ]
+    # Create a task for continuously updating the display with the latest sensor readings.
+    if ENABLE_DISPLAY:
+        tasks.append(asyncio.create_task(update_display()))
+
     # Create tasks for reading data from the SCD4X, BME680, and RadSens sensors.
     if ENABLE_SCD4X_SENSOR:
         tasks.append(asyncio.create_task(read_scd4x()))
