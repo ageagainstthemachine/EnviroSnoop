@@ -42,8 +42,9 @@ EnviroSnoop requires various CircuitPython libraries and modules for its functio
 - `supervisor`: Provides access to CircuitPython's supervisor functions.
 - `busio`: Provides support for bus protocols like I2C and SPI.
 - `adafruit_requests`: CircuitPython library for making HTTP requests.
+- `adafruit_connection_manager`: Library for managing sockets and connections.
 - `ssl`: Provides access to Transport Layer Security (TLS) encryption and peer authentication facilities for network sockets.
-- `circuitpython_base64`: Base64 encoding and decoding for CircuitPython.
+- `circuitpython_base64`: Base64 encoding and decoding for CircuitPython. Note: I have renamed the standard base64.mpy to be circuitpython_base64.mpy.
 
 ### Display Libraries
 - `displayio`: For managing displays.
@@ -103,6 +104,7 @@ EnviroSnoop's behavior and sensor integration can be customized via the `setting
 - `SCD4X_INTERVAL`, `BME680_INTERVAL`, `RADSENS_INTERVAL`, `PM25_INTERVAL`: Read intervals for each sensor (in seconds).
 
 ### Display Configuration
+- `ENABLE_DISPLAY`: Enable or disable the OLED display functionality.
 - `DISPLAY_UPDATE_INTERVAL`: Interval for updating the display (in seconds).
 
 ### Sensor Calibrations
