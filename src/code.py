@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20250811a
+# EnviroSnoop Environmental Monitor 20250816a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # ------------------------
@@ -52,13 +52,16 @@ if ENABLE_PM25_SENSOR:
     from adafruit_pm25.uart import PM25_UART
 
 # SSD1306
-ENABLE_DISPLAY = os.getenv('ENABLE_DISPLAY', 'true').lower() == 'true'
-# Import if enabled
 if ENABLE_DISPLAY:
     import displayio
     import adafruit_displayio_ssd1306
     import terminalio
     from adafruit_display_text import label
+    # CP 9+: I2CDisplay moved/renamed. Fall back for CP 8.x.
+    try:
+        from i2cdisplaybus import I2CDisplayBus
+    except ImportError:
+        from displayio import I2CDisplay as I2CDisplayBus  # Backwards compatability
 
 # ------------------------
 # Initial Operations
@@ -305,7 +308,9 @@ if ENABLE_DISPLAY:
     WIDTH = 128
     HEIGHT = 64
     #BORDER = 5
-    display_bus = displayio.I2CDisplay(i2c, device_address=0x3c) #, reset=oled_reset)
+    # CP 9+: use I2CDisplayBus (compat shim earlier supports CP 8.x)
+    # If you have a reset pin wired, pass reset= (below)
+    display_bus = I2CDisplayBus(i2c, device_address=0x3C) #, reset=oled_reset)
     display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=WIDTH, height=HEIGHT)
     # Create a bitmap with two colors
     bitmap = displayio.Bitmap(WIDTH, HEIGHT, 2)
@@ -343,7 +348,12 @@ if ENABLE_RADSENS_SENSOR and ENABLE_DISPLAY:
 
 if ENABLE_DISPLAY:
     # Show the group on the Display
-    display.show(group)
+    # Note: CP 9+: .show() removed in favor of root_group
+    try:
+        display.root_group = group
+    except AttributeError:
+        # Back-compat for CP 8.x
+        display.show(group)
 
 # Manually trigger garbage collection
 gc.collect()
