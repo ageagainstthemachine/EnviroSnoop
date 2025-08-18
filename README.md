@@ -106,6 +106,8 @@ EnviroSnoop's behavior and sensor integration can be customized via the `setting
 ### Display Configuration
 - `ENABLE_DISPLAY`: Enable or disable the OLED display functionality.
 - `DISPLAY_UPDATE_INTERVAL`: Interval for updating the display (in seconds).
+- `OLED_I2C_ADDR`: I2C address (in hexadecimal) for the OLED screen (default is 0x3C).
+- `OLED_CONTRAST`: OLED display contrast (brightness) with acceptable values between 0.00 and 1.00.
 
 ### Sensor Calibrations
 - `SEA_LEVEL_PRESSURE`: Sea level pressure in hPa for calibrating sensors.
