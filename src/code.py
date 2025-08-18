@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20250816a
+# EnviroSnoop Environmental Monitor 20250817a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # ------------------------
@@ -25,6 +25,8 @@ from circuitpython_base64 import b64decode
 # Syslog
 SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED', 'false').lower() == 'true'
 import usyslog
+# Define s so it's always present
+s = None
 
 # Environment variables to determine if a sensor is enabled
 # BME680
@@ -53,6 +55,8 @@ if ENABLE_PM25_SENSOR:
 
 # SSD1306
 ENABLE_DISPLAY = os.getenv('ENABLE_DISPLAY', 'true').lower() == 'true'
+# Display OK flag set to false to begin with
+DISPLAY_OK = False
 # Import if enabled
 if ENABLE_DISPLAY:
     import displayio
@@ -63,16 +67,36 @@ if ENABLE_DISPLAY:
     try:
         from i2cdisplaybus import I2CDisplayBus
     except ImportError:
-        from displayio import I2CDisplay as I2CDisplayBus  # Backwards compatability
+        from displayio import I2CDisplay as I2CDisplayBus  # Backward compatibility
+
+
+    # ---- SSD1306 contrast / power helpers (experimental) ----
+    OLED_ADDR = int(os.getenv('OLED_I2C_ADDR', '0x3C'), 16)
+
+    def _oled_send_cmds(cmd_bytes: bytes) -> None:
+        if not (ENABLE_DISPLAY and DISPLAY_OK):
+            return
+        for _ in range(5):
+            if i2c.try_lock():
+                try:
+                    i2c.writeto(OLED_ADDR, b"\x00" + cmd_bytes)
+                finally:
+                    i2c.unlock()
+                return
+            time.sleep(0.005)
+
+    def set_oled_contrast(level: float) -> None:
+        level = 0.0 if level < 0.0 else 1.0 if level > 1.0 else level
+        val = int(level * 255)
+        _oled_send_cmds(bytes((0x81, val)))  # 0x81 = SETCONTRAST
+
+    def oled_sleep(sleep: bool = True) -> None:
+        _oled_send_cmds(bytes((0xAE if sleep else 0xAF,)))  # 0xAE=OFF 0xAF=ON
+
 
 # ------------------------
 # Initial Operations
 # ------------------------
-
-# If display is enabled, release the display
-if ENABLE_DISPLAY:
-    # Release the display
-    displayio.release_displays()
 
 # Load WiFi credentials from settings.toml for network connection
 ssid = os.getenv('SSID')
@@ -124,8 +148,13 @@ SYSLOG_SERVER = os.getenv('SYSLOG_SERVER')
 SYSLOG_PORT = int(os.getenv('SYSLOG_PORT', 514))  # Default to 514 if not set
 
 # Initialize syslog server if enabled
-if SYSLOG_SERVER_ENABLED:
-    s = usyslog.UDPClient(pool, SYSLOG_SERVER, SYSLOG_PORT)
+if SYSLOG_SERVER_ENABLED and SYSLOG_SERVER:
+    try:
+        s = usyslog.UDPClient(pool, SYSLOG_SERVER, SYSLOG_PORT)
+        structured_log("Syslog enabled", usyslog.S_INFO)
+    except Exception as e:
+        SYSLOG_SERVER_ENABLED = False     # flip first
+        structured_log(f"Syslog disabled: {e}", usyslog.S_ERR)  # safe logging now
 
 # Structured logging (logs messages to both the console and syslog server based on configuration)
 def structured_log(message, level=usyslog.S_INFO):
@@ -192,11 +221,35 @@ ntp_sync_interval = int(os.getenv('NTP_SYNC_INTERVAL', DEFAULT_NTP_SYNC_INTERVAL
 structured_log('Loaded NTP sync interval value of ' + str(ntp_sync_interval))
 # Global flag to indicate if time has been synchronized
 time_synced = False
-
+# If display is enabled, release_displays (to not hold bus during soft reboots)
+if ENABLE_DISPLAY:
+    try:
+        # Release the display
+        displayio.release_displays()
+    # Catch any exceptions
+    except Exception as e:
+        # Log the failed display release attempt
+        structured_log(f"displayio.release_displays() failed: {e}", usyslog.S_ERR)
 # Print I2C initializing to the log for diagnostic purposes
 structured_log('Initializing I2C')
 # Initialize I2C for the main program
-i2c = busio.I2C(sda=board.GP20, scl=board.GP21)
+i2c = None
+try:
+    i2c = busio.I2C(sda=board.GP20, scl=board.GP21)
+except ValueError as e:
+    # Likely a stale owner; try to recover once
+    structured_log(f"I2C init failed ({e}); retrying after releasing displays", usyslog.S_ERR)
+    # If display is enabled, release_displays
+    if ENABLE_DISPLAY:
+        try:
+            # Release the display
+            displayio.release_displays()
+        # Catch any exceptions
+        except Exception:
+            pass
+    time.sleep(0.05)
+    # Create i2c
+    i2c = busio.I2C(sda=board.GP20, scl=board.GP21)
 
 # Load sea level pressure calibration value from settings.toml
 SEA_LEVEL_PRESSURE = float(os.getenv('SEA_LEVEL_PRESSURE', '1013.25'))  # Default to 1013.25 hPa if not set
@@ -298,37 +351,58 @@ INFLUXDB_TOKEN = os.getenv('INFLUXDB_TOKEN')
 INFLUXDB_URL = f"{INFLUXDB_URL_BASE}?org={INFLUXDB_ORG}&bucket={INFLUXDB_BUCKET}"
 HEADERS = {
     "Authorization": f"Token {INFLUXDB_TOKEN}",
-    "Content-Type": "application/json"
+    "Content-Type": "text/plain; charset=utf-8"   # not JSON
 }
+# Determine if all of the config elements are there and then set a flag (note: just conducts a basic validity check of them)
+INFLUX_READY = all([INFLUXDB_URL_BASE, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN])
+# If elements are missing, let's log it
+if not INFLUX_READY:
+    # Log the incomplete InfluxDB config issue
+    structured_log("InfluxDB config incomplete; metrics disabled.", usyslog.S_ERR)
+
 
 # If display is enabled, setup the display
 if ENABLE_DISPLAY:
     # Initialize the OLED display
-    #displayio.release_displays() # We called this earlier
+    # If display is enabled, release the display
+    displayio.release_displays()
+    # Load display update interval from settings.toml
     display_update_interval = int(os.getenv('DISPLAY_UPDATE_INTERVAL', 1))
     #oled_reset = board.GP28 # If your display has a reset pin connected.
     WIDTH = 128
     HEIGHT = 64
     #BORDER = 5
-    # CP 9+: use I2CDisplayBus (compat shim earlier supports CP 8.x)
-    # If you have a reset pin wired, pass reset= (below)
-    display_bus = I2CDisplayBus(i2c, device_address=0x3C) #, reset=oled_reset)
-    display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=WIDTH, height=HEIGHT)
-    # Create a bitmap with two colors
-    bitmap = displayio.Bitmap(WIDTH, HEIGHT, 2)
-    # Create a two color palette
-    palette = displayio.Palette(2)
-    palette[0] = 0x000000  # Black
-    palette[1] = 0xFFFFFF  # White
-    # Create a TileGrid using the Bitmap and Palette
-    tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
-    # Create a Group to hold the TileGrid
-    group = displayio.Group()
-    # Add the TileGrid to the Group
-    group.append(tile_grid)
+    try:
+        # CP 9+: use I2CDisplayBus (compat shim earlier supports CP 8.x)
+        # If you have a reset pin wired, pass reset= (below)
+        display_bus = I2CDisplayBus(i2c, device_address=OLED_ADDR)  # , reset=oled_reset)
+        display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=WIDTH, height=HEIGHT)
+        # Set display OK flag to true
+        DISPLAY_OK = True
+        
+        # Apply experimental contrast from settings
+        OLED_CONTRAST = float(os.getenv('OLED_CONTRAST', '1.0'))
+        set_oled_contrast(OLED_CONTRAST)
+
+        # Create a bitmap with two colors
+        bitmap = displayio.Bitmap(WIDTH, HEIGHT, 2)
+        # Create a two color palette
+        palette = displayio.Palette(2)
+        palette[0] = 0x000000  # Black
+        palette[1] = 0xFFFFFF  # White
+        # Create a TileGrid using the Bitmap and Palette
+        tile_grid = displayio.TileGrid(bitmap, pixel_shader=palette)
+        # Create a Group to hold the TileGrid
+        group = displayio.Group()
+        # Add the TileGrid to the Group
+        group.append(tile_grid)
+    # Catch any exceptions
+    except Exception as e:
+        # Log the failed display init
+        structured_log(f"OLED init failed: {e}", usyslog.S_ERR)
 
 # Conditional label creation based on whether sensors are enabled or disabled
-if ENABLE_BME680_SENSOR and ENABLE_DISPLAY:
+if ENABLE_DISPLAY and DISPLAY_OK and ENABLE_BME680_SENSOR:
     temperature_label = label.Label(terminalio.FONT, text="Temp: ", color=0xFFFFFF, x=0, y=8)
     humidity_label = label.Label(terminalio.FONT, text="Humid: ", color=0xFFFFFF, x=0, y=20)
     pressure_label = label.Label(terminalio.FONT, text="Press: ", color=0xFFFFFF, x=0, y=32)
@@ -340,15 +414,15 @@ if ENABLE_BME680_SENSOR and ENABLE_DISPLAY:
     ##group.append(gas_label)
     ##group.append(altitude_label)
 
-if ENABLE_SCD4X_SENSOR and ENABLE_DISPLAY:
+if ENABLE_DISPLAY and DISPLAY_OK and ENABLE_SCD4X_SENSOR:
     co2_label = label.Label(terminalio.FONT, text="CO2: ", color=0xFFFFFF, x=0, y=44)
     group.append(co2_label)
 
-if ENABLE_RADSENS_SENSOR and ENABLE_DISPLAY:
+if ENABLE_DISPLAY and DISPLAY_OK and ENABLE_RADSENS_SENSOR:
     radiation_label = label.Label(terminalio.FONT, text="Rad: ", color=0xFFFFFF, x=0, y=56)
     group.append(radiation_label)
 
-if ENABLE_DISPLAY:
+if ENABLE_DISPLAY and DISPLAY_OK:
     # Show the group on the Display
     # Note: CP 9+: .show() removed in favor of root_group
     try:
@@ -542,7 +616,7 @@ async def read_bme680():
             await asyncio.sleep(10)
 
         # Await for 1 second before the next sensor read to regulate the data acquisition rate.
-        await asyncio.sleep(1)
+        await asyncio.sleep(bme680_interval)
 
 # Asynchronous function to continuously read data from the RadSens sensor and update global variables.
 # The RadSens sensor is used for measuring radiation intensity and the number of radiation pulses.
@@ -672,7 +746,7 @@ async def send_data_to_influxdb():
     global particles_03um, particles_05um, particles_10um, particles_25um, particles_50um, particles_100um
 
     # Wait until the device is connected to WiFi and has synchronized time.
-    while not wifi.radio.connected and not time_synced:
+    while not (wifi.radio.connected and time_synced):
         await asyncio.sleep(1)
 
     # Create SSL context for secure HTTP communication.
@@ -795,11 +869,14 @@ async def main():
         asyncio.create_task(wifi_connect()),
         # Create a task for synchronizing the device's time with an NTP server.
         asyncio.create_task(ntp_time_sync()),
-        # Create a task for sending sensor data to an InfluxDB database.
-        asyncio.create_task(send_data_to_influxdb()),
     ]
+    
+    # Create a task for sending sensor data to an InfluxDB database (if it is ready).
+    if INFLUX_READY:
+        tasks.append(asyncio.create_task(send_data_to_influxdb()))
+
     # Create a task for continuously updating the display with the latest sensor readings.
-    if ENABLE_DISPLAY:
+    if ENABLE_DISPLAY and DISPLAY_OK:
         tasks.append(asyncio.create_task(update_display()))
 
     # Create tasks for reading data from the SCD4X, BME680, and RadSens sensors.
