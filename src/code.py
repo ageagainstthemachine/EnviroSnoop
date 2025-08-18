@@ -52,6 +52,8 @@ if ENABLE_PM25_SENSOR:
     from adafruit_pm25.uart import PM25_UART
 
 # SSD1306
+ENABLE_DISPLAY = os.getenv('ENABLE_DISPLAY', 'true').lower() == 'true'
+# Import if enabled
 if ENABLE_DISPLAY:
     import displayio
     import adafruit_displayio_ssd1306
