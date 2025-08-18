@@ -1,4 +1,4 @@
-# EnviroSnoop settings.toml 20250811a
+# EnviroSnoop settings.toml 20250817a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # WiFi Configuration
@@ -27,10 +27,15 @@ BME680_INTERVAL = "5"
 RADSENS_INTERVAL = "5"
 PM25_INTERVAL = "5"
 
+# Display Configuration
 # Enable/disable the display
 ENABLE_DISPLAY = "FALSE"
 # Display update interval (in seconds)
 DISPLAY_UPDATE_INTERVAL = "1"
+# OLED I2C display address
+OLED_I2C_ADDR = "0x3C"
+# OLED display contrast (brightness) 0.00-1.00
+OLED_CONTRAST = "0.10"
 
 # Sensor Calibrations
 SEA_LEVEL_PRESSURE = "1013.25"
