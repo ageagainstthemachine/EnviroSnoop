@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20250817a
+# EnviroSnoop Environmental Monitor 20250818a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # ------------------------
@@ -23,10 +23,36 @@ import ssl
 from circuitpython_base64 import b64decode
 
 # Syslog
-SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED', 'false').lower() == 'true'
-import usyslog
 # Define s so it's always present
 s = None
+# Syslog enabled/disabled
+SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED', 'false').lower() == 'true'
+# Import usyslog if enabled
+try:
+    if SYSLOG_SERVER_ENABLED:
+        import usyslog
+except Exception as e:
+    # Ensure usyslog symbol always exists, even when disabled
+    if not SYSLOG_SERVER_ENABLED and 'usyslog' not in globals():
+        # Fall back to shim and disable syslog
+        class _USyslogShim:
+            S_INFO = 6
+            S_ERR  = 3
+        usyslog = _USyslogShim()
+    SYSLOG_SERVER_ENABLED = False
+# Syslog server configuration for syslog logging (if enabled)
+if SYSLOG_SERVER_ENABLED:
+    # Syslog server location
+    SYSLOG_SERVER = os.getenv('SYSLOG_SERVER')
+    # Syslog port
+    SYSLOG_PORT = int(os.getenv('SYSLOG_PORT', 514))  # Default to 514 if not set
+
+# Console logging enabled/disabled
+CONSOLE_LOG_ENABLED = os.getenv('CONSOLE_LOG_ENABLED', 'false').lower() == 'true'
+
+# Memory monitoring enabled/disabled
+ENABLE_MEMORY_MONITORING = os.getenv('MEMORY_MONITORING', 'false').lower() == 'true'
+
 
 # Environment variables to determine if a sensor is enabled
 # BME680
@@ -137,15 +163,21 @@ wifi_connect_sync()
 # Diagnostics
 # ------------------------
 
-# Global variable to store the console logging setting
-CONSOLE_LOG_ENABLED = os.getenv('CONSOLE_LOG_ENABLED', 'false').lower() == 'true'
-
-# Read the MEMORY_MONITORING setting from the environment and default to False if not set
-ENABLE_MEMORY_MONITORING = os.getenv('MEMORY_MONITORING', 'false').lower() == 'true'
-
-# Syslog server configuration for syslog logging
-SYSLOG_SERVER = os.getenv('SYSLOG_SERVER')
-SYSLOG_PORT = int(os.getenv('SYSLOG_PORT', 514))  # Default to 514 if not set
+# Structured logging (logs messages to both the console and syslog server based on configuration)
+def structured_log(message, level=None):
+    # Fallback 
+    if level is None:
+        level = usyslog.S_INFO
+    # If enabled, log via appropriate method(s)
+    if CONSOLE_LOG_ENABLED:
+        # Console output
+        print(message)
+    if SYSLOG_SERVER_ENABLED and s is not None:
+        # Syslog attempt
+        try:
+            s.log(level, message)
+        except RuntimeError:
+            pass
 
 # Initialize syslog server if enabled
 if SYSLOG_SERVER_ENABLED and SYSLOG_SERVER:
@@ -155,17 +187,6 @@ if SYSLOG_SERVER_ENABLED and SYSLOG_SERVER:
     except Exception as e:
         SYSLOG_SERVER_ENABLED = False     # flip first
         structured_log(f"Syslog disabled: {e}", usyslog.S_ERR)  # safe logging now
-
-# Structured logging (logs messages to both the console and syslog server based on configuration)
-def structured_log(message, level=usyslog.S_INFO):
-    if CONSOLE_LOG_ENABLED:
-        print(message)
-    
-    if SYSLOG_SERVER_ENABLED:
-        try:
-            s.log(level, message)
-        except RuntimeError:
-            pass
 
 # This function is designed to monitor and log the current memory usage of the program.
 # It can be used to track memory consumption at various points in the code.
@@ -365,7 +386,7 @@ if not INFLUX_READY:
 if ENABLE_DISPLAY:
     # Initialize the OLED display
     # If display is enabled, release the display
-    displayio.release_displays()
+    #displayio.release_displays() # Commented out due to being somewhat duplicative
     # Load display update interval from settings.toml
     display_update_interval = int(os.getenv('DISPLAY_UPDATE_INTERVAL', 1))
     #oled_reset = board.GP28 # If your display has a reset pin connected.
@@ -815,37 +836,27 @@ async def update_display():
     while True:  # Infinite loop for continuous updates.
         # Update the display only if BME680 sensor is enabled
         if ENABLE_BME680_SENSOR:
-            # Only update the display if the sensor data is available
-            if bme680_temperature is not None:
-                temperature_label.text = f"Temp: {bme680_temperature:.2f}C"
-            else:
-                temperature_label.text = "Temp: --"
-
-            if bme680_humidity is not None:
-                humidity_label.text = f"Humid: {bme680_humidity:.2f}%"
-            else:
-                humidity_label.text = "Humid: --"
-
-            if bme680_pressure is not None:
-                pressure_label.text = f"Press: {bme680_pressure:.2f}hPa"
-            else:
-                pressure_label.text = "Press: --"
+            # Only update the display if the sensor data is available; otherwise show fallback
+            temperature_label.text = f"Temp: {bme680_temperature:.2f}C" if bme680_temperature is not None else "Temp: --"
+            humidity_label.text = f"Humid: {bme680_humidity:.2f}%" if bme680_humidity is not None else "Humid: --"
+            pressure_label.text = f"Press: {bme680_pressure:.2f}hPa" if bme680_pressure is not None else "Press: --"
 
             # Log the updated BME680 sensor readings for diagnostics
             structured_log(f"Updating Display - Temp: {bme680_temperature}, Humidity: {bme680_humidity}, Pressure: {bme680_pressure}", usyslog.S_INFO)
 
         # Update the display only if SCD4X sensor is enabled
         if ENABLE_SCD4X_SENSOR:
-            # Update CO2 reading on the display
-            co2_label.text = f"CO2: {scd4x_co2} ppm"
+            # Only update if a valid reading is present; otherwise show fallback to match pattern
+            co2_label.text = f"CO2: {int(scd4x_co2)} ppm" if scd4x_co2 is not None else "CO2: --"
 
             # Log the updated SCD4X CO2 reading for diagnostics
             structured_log(f"Updating Display - CO2: {scd4x_co2}", usyslog.S_INFO)
 
         # Update the display only if RadSens sensor is enabled
         if ENABLE_RADSENS_SENSOR:
-            # Update radiation reading on the display
-            radiation_label.text = f"Rad: {rad_intensy_dynamic} uR/h"
+            # Only update if a valid reading is present; otherwise show fallback to match pattern
+            # Use int() for compact display; switch to :.1f for one decimal place if preferred
+            radiation_label.text = f"Rad: {int(rad_intensy_dynamic)} uR/h" if rad_intensy_dynamic is not None else "Rad: --"
 
             # Log the updated RadSens radiation reading for diagnostics
             structured_log(f"Updating Display - Radiation: {rad_intensy_dynamic}", usyslog.S_INFO)
