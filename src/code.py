@@ -1,4 +1,4 @@
-# EnviroSnoop Environmental Monitor 20250818a
+# EnviroSnoop Environmental Monitor 20250826a
 # https://github.com/ageagainstthemachine/EnviroSnoop
 
 # ------------------------
@@ -20,26 +20,27 @@ import supervisor
 import busio
 import adafruit_requests as requests
 import ssl
-from circuitpython_base64 import b64decode
 
 # Syslog
 # Define s so it's always present
 s = None
 # Syslog enabled/disabled
 SYSLOG_SERVER_ENABLED = os.getenv('SYSLOG_SERVER_ENABLED', 'false').lower() == 'true'
-# Import usyslog if enabled
+# Try to import usyslog if enabled
 try:
     if SYSLOG_SERVER_ENABLED:
         import usyslog
-except Exception as e:
-    # Ensure usyslog symbol always exists, even when disabled
-    if not SYSLOG_SERVER_ENABLED and 'usyslog' not in globals():
-        # Fall back to shim and disable syslog
-        class _USyslogShim:
-            S_INFO = 6
-            S_ERR  = 3
-        usyslog = _USyslogShim()
+except Exception:
+    # import failed; disable syslog
     SYSLOG_SERVER_ENABLED = False
+
+# Ensure constants always exist
+if 'usyslog' not in globals():
+    class _USyslogShim:
+        S_INFO = 6
+        S_ERR  = 3
+    usyslog = _USyslogShim()
+
 # Syslog server configuration for syslog logging (if enabled)
 if SYSLOG_SERVER_ENABLED:
     # Syslog server location
